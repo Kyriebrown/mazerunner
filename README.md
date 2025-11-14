@@ -1,1 +1,1 @@
-# MazeRunner
+# mazerunner
