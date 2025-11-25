@@ -1,0 +1,400 @@
+const GRID_SIZE = 10;
+const NUM_STATES = GRID_SIZE * GRID_SIZE;
+const NUM_ACTIONS = 4;
+
+const CELL_FREE = 0;
+const CELL_OBSTACLE = 1;
+const CELL_START = 2;
+const CELL_GOAL = 3;
+
+let grid = [];
+let startPos = null;
+let goalPos = null;
+let setupPhase = 'start';
+
+const gridContainer = document.getElementById('grid-container');
+const heatmapContainer = document.getElementById('heatmap-container');
+const pathStatus = document.getElementById('path-status');
+const modelStatus = document.getElementById('model-status');
+const startButton = document.getElementById('start-button');
+const leftPanelTitle = document.getElementById('left-panel-title');
+
+const episodeValue = document.getElementById('episode-value');
+const lossValue = document.getElementById('loss-value');
+const epsilonValue = document.getElementById('epsilon-value');
+const samplesValue = document.getElementById('samples-value');
+
+let qNet, targetNet;
+let replayBuffer = [];
+const MAX_REPLAY_BUFFER = 10000;
+const BATCH_SIZE = 64;
+
+let epsilon = 1.0;
+const EPSILON_DECAY = 0.999;
+const MIN_EPSILON = 0.01;
+const GAMMA = 0.95;
+const LEARNING_RATE = 0.001;
+const TARGET_UPDATE_EVERY = 5;
+
+let isTraining = false;
+
+let bestPathFound = [];
+let bestPathLength = Infinity;
+
+function initGrid() {
+    gridContainer.innerHTML = '';
+    heatmapContainer.innerHTML = '';
+    grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(CELL_FREE));
+    
+    for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            const cell = document.createElement('div');
+            cell.className = 'grid-cell cell-free';
+            cell.dataset.r = r;
+            cell.dataset.c = c;
+            cell.id = `cell-${r}-${c}`;
+            gridContainer.appendChild(cell);
+            
+            const mapCell = document.createElement('div');
+            mapCell.className = 'heatmap-cell';
+            mapCell.id = `heat-${r}-${c}`;
+            mapCell.style.backgroundColor = 'rgb(45, 55, 72)';
+            heatmapContainer.appendChild(mapCell);
+        }
+    }
+    gridContainer.addEventListener('click', handleGridClick);
+    pathStatus.textContent = 'Click to set Start (🔵)';
+}
+
+function handleGridClick(e) {
+    if (isTraining) return;
+    
+    const cell = e.target.closest('.grid-cell');
+    if (!cell) return;
+    
+    const r = parseInt(cell.dataset.r);
+    const c = parseInt(cell.dataset.c);
+
+    if (setupPhase === 'start') {
+        startPos = { r, c };
+        grid[r][c] = CELL_START;
+        cell.classList.add('cell-start');
+        cell.innerHTML = '🔵';
+        setupPhase = 'goal';
+        pathStatus.textContent = 'Click to set Goal (🟢)';
+    } else if (setupPhase === 'goal') {
+        if (r === startPos.r && c === startPos.c) return;
+        goalPos = { r, c };
+        grid[r][c] = CELL_GOAL;
+        cell.classList.add('cell-goal');
+        cell.innerHTML = '🟢';
+        setupPhase = 'obstacles';
+        pathStatus.textContent = 'Click to toggle obstacles (🟥)';
+    } else {
+        if (r === startPos.r && c === startPos.c) return;
+        if (r === goalPos.r && c === goalPos.c) return;
+        
+        if (grid[r][c] === CELL_FREE) {
+            grid[r][c] = CELL_OBSTACLE;
+            cell.classList.add('cell-obstacle');
+        } else {
+            grid[r][c] = CELL_FREE;
+            cell.classList.remove('cell-obstacle');
+        }
+    }
+}
+
+function posToState(r, c) {
+    return r * GRID_SIZE + c;
+}
+
+function stateToPos(state) {
+    return { r: Math.floor(state / GRID_SIZE), c: state % GRID_SIZE };
+}
+
+function createDQNModel() {
+    const model = tf.sequential();
+    
+    model.add(tf.layers.dense({
+        inputShape: [NUM_STATES],
+        units: 64,
+        activation: 'relu'
+    }));
+    model.add(tf.layers.dense({
+        units: 32,
+        activation: 'relu'
+    }));
+    model.add(tf.layers.dense({
+        units: NUM_ACTIONS,
+        activation: 'linear'
+    }));
+    
+    model.compile({
+        optimizer: tf.train.adam(LEARNING_RATE),
+        loss: 'meanSquaredError'
+    });
+    
+    return model;
+}
+
+function getAction(state, useEpsilon = true) {
+    if (useEpsilon && Math.random() < epsilon) {
+        return Math.floor(Math.random() * NUM_ACTIONS);
+    }
+    
+    return tf.tidy(() => {
+        const qValues = qNet.predict(tf.oneHot(tf.tensor1d([state], 'int32'), NUM_STATES));
+        return qValues.argMax(1).dataSync()[0];
+    });
+}
+
+function step(state, action) {
+    let { r, c } = stateToPos(state);
+
+    if (action === 0) r = Math.max(0, r - 1);
+    else if (action === 1) r = Math.min(GRID_SIZE - 1, r + 1);
+    else if (action === 2) c = Math.max(0, c - 1);
+    else if (action === 3) c = Math.min(GRID_SIZE - 1, c + 1);
+
+    const nextState = posToState(r, c);
+    const cellType = grid[r][c];
+
+    let reward = -0.01;
+    let terminated = false;
+
+    if (cellType === CELL_GOAL) {
+        reward = 1.0;
+        terminated = true;
+    } else if (cellType === CELL_OBSTACLE) {
+        reward = -0.5;
+        return { nextState: state, reward, terminated: false };
+    }
+    
+    return { nextState, reward, terminated };
+}
+
+function addToBuffer(state, action, reward, nextState, terminated) {
+    if (replayBuffer.length >= MAX_REPLAY_BUFFER) {
+        replayBuffer.shift();
+    }
+    replayBuffer.push({ state, action, reward, nextState, terminated });
+    samplesValue.textContent = replayBuffer.length;
+}
+
+async function trainBatch() {
+    if (replayBuffer.length < BATCH_SIZE) {
+        return;
+    }
+    
+    const batch = [];
+    for (let i = 0; i < BATCH_SIZE; i++) {
+        batch.push(replayBuffer[Math.floor(Math.random() * replayBuffer.length)]);
+    }
+
+    const { states, actions, rewards, nextStates, terminateds } = tf.tidy(() => {
+        const states = batch.map(t => t.state);
+        const actions = batch.map(t => t.action);
+        const rewards = batch.map(t => t.reward);
+        const nextStates = batch.map(t => t.nextState);
+        const terminateds = batch.map(t => t.terminated);
+        return { states, actions, rewards, nextStates, terminateds };
+    });
+
+    const targets = tf.tidy(() => {
+        const nextQValues = targetNet.predict(tf.oneHot(tf.tensor1d(nextStates, 'int32'), NUM_STATES));
+        const maxNextQ = nextQValues.max(1); 
+
+        const targetQ = tf.tensor1d(rewards).add(
+            tf.tensor1d(terminateds).logicalNot().cast('float32').mul(GAMMA).mul(maxNextQ)
+        );
+        
+        const currentQValues = qNet.predict(tf.oneHot(tf.tensor1d(states, 'int32'), NUM_STATES));
+        
+        const buffer = currentQValues.bufferSync();
+        const targetQData = targetQ.dataSync();
+
+        for(let i = 0; i < BATCH_SIZE; i++) {
+            buffer.set(targetQData[i], i, actions[i]);
+        }
+        
+        targetQ.dispose(); 
+        
+        return buffer.toTensor();
+    }); 
+
+    const history = await qNet.fit(
+        tf.oneHot(tf.tensor1d(states, 'int32'), NUM_STATES),
+        targets,
+        { epochs: 1, batchSize: BATCH_SIZE, verbose: 0 }
+    );
+    
+    lossValue.textContent = history.history.loss[0].toFixed(4);
+    
+    tf.dispose([targets]);
+}
+
+function updateLeftPanel() {
+    document.querySelectorAll('.grid-cell.cell-path').forEach(c => c.classList.remove('cell-path'));
+    
+    let state = posToState(startPos.r, startPos.c);
+    let currentGreedyPath = [state];
+    let terminated = false;
+    let steps = 0;
+    const maxSteps = 50;
+
+    while (!terminated && steps < maxSteps) {
+        const action = getAction(state, false);
+        const { nextState, reward, terminated: term } = step(state, action);
+        
+        state = nextState;
+        currentGreedyPath.push(state);
+        terminated = term;
+        steps++;
+    }
+
+    if (terminated) {
+        if (steps < bestPathLength) {
+            bestPathLength = steps;
+            bestPathFound = currentGreedyPath;
+            pathStatus.textContent = `New Best Path! Found goal in ${steps} steps.`;
+        } else {
+            pathStatus.textContent = `Found goal in ${steps} steps. (Best: ${bestPathLength} steps)`;
+        }
+    } else {
+        const bestStatus = bestPathLength === Infinity ? 'N/A' : `${bestPathLength} steps`;
+        pathStatus.textContent = `Agent failed to find goal. (Best: ${bestStatus})`;
+    }
+
+    for (const s of currentGreedyPath) {
+        if (s === posToState(startPos.r, startPos.c) || s === posToState(goalPos.r, goalPos.c)) {
+            continue;
+        }
+        
+        const { r, c } = stateToPos(s);
+        const cellElement = document.getElementById(`cell-${r}-${c}`);
+        if (cellElement && !cellElement.classList.contains('cell-obstacle')) {
+            cellElement.classList.add('cell-path');
+        }
+    }
+}
+
+function updateRightPanel() {
+    tf.tidy(() => {
+        const allStates = tf.tensor1d(Array.from({length: NUM_STATES}, (_, i) => i), 'int32');
+        const allQValues = qNet.predict(tf.oneHot(allStates, NUM_STATES));
+        const maxQValues = allQValues.max(1).dataSync(); 
+
+        let minQ = Infinity;
+        let maxQ = -Infinity;
+        for (const q of maxQValues) {
+            if (q > maxQ) maxQ = q;
+            if (q < minQ) minQ = q;
+        }
+        
+        const range = maxQ - minQ;
+        if (range === 0) return;
+        
+        for (let s = 0; s < NUM_STATES; s++) {
+            const { r, c } = stateToPos(s);
+            const cell = document.getElementById(`heat-${r}-${c}`);
+            
+            if (grid[r][c] === CELL_OBSTACLE) {
+                cell.style.backgroundColor = 'rgb(197, 48, 48)';
+            } else if (grid[r][c] === CELL_GOAL) {
+                cell.style.backgroundColor = 'rgb(47, 133, 90)';
+            } else {
+                const normQ = (maxQValues[s] - minQ) / range;
+                const intensity = Math.floor(normQ * 255);
+                const rC = intensity;
+                const gC = Math.max(0, Math.floor((normQ - 0.5) * 2 * 255));
+                cell.style.backgroundColor = `rgb(${rC}, ${gC}, 0)`;
+            }
+        }
+    });
+}
+
+async function startTraining() {
+    if (!startPos || !goalPos) {
+        pathStatus.textContent = 'Please set Start and Goal first!';
+        return;
+    }
+    if (isTraining) return;
+    
+    isTraining = true;
+    startButton.disabled = true;
+    startButton.textContent = 'Training...';
+    gridContainer.removeEventListener('click', handleGridClick);
+    leftPanelTitle.textContent = "Agent's Current Path";
+    
+    qNet = createDQNModel();
+    targetNet = createDQNModel();
+    targetNet.setWeights(qNet.getWeights());
+    
+    bestPathFound = [];
+    bestPathLength = Infinity;
+    
+    modelStatus.textContent = 'Training...';
+    
+    const numEpisodes = 2000;
+    for (let i = 0; i < numEpisodes; i++) {
+        let state = posToState(startPos.r, startPos.c);
+        let terminated = false;
+        let episodeSteps = 0;
+        const maxEpisodeSteps = 100;
+
+        while (!terminated && episodeSteps < maxEpisodeSteps) {
+            const action = getAction(state, true); // Epsilon-greedy
+            const { nextState, reward, terminated: term } = step(state, action);
+            
+            addToBuffer(state, action, reward, nextState, term);
+            
+            state = nextState;
+            terminated = term;
+            episodeSteps++;
+        }
+
+        await trainBatch();
+        
+        if (i % TARGET_UPDATE_EVERY === 0) {
+            targetNet.setWeights(qNet.getWeights());
+            
+            episodeValue.textContent = i;
+            epsilon = Math.max(MIN_EPSILON, epsilon * EPSILON_DECAY);
+            epsilonValue.textContent = epsilon.toFixed(3);
+            
+            updateLeftPanel();
+            updateRightPanel();
+            
+            await new Promise(r => setTimeout(r, 0));
+        }
+    }
+    
+    modelStatus.textContent = 'Training Complete!';
+    leftPanelTitle.textContent = "Agent's Best Path Found";
+    
+    document.querySelectorAll('.grid-cell.cell-path').forEach(c => c.classList.remove('cell-path'));
+
+    if (bestPathLength !== Infinity) {
+        for (const s of bestPathFound) {
+            if (s === posToState(startPos.r, startPos.c) || s === posToState(goalPos.r, goalPos.c)) {
+                continue;
+            }
+            const { r, c } = stateToPos(s);
+            const cellElement = document.getElementById(`cell-${r}-${c}`);
+            if (cellElement && !cellElement.classList.contains('cell-obstacle')) {
+                cellElement.classList.add('cell-path');
+            }
+        }
+        pathStatus.textContent = `Training complete. Best path found: ${bestPathLength} steps.`;
+    } else {
+        pathStatus.textContent = `Training complete. Agent never found the goal.`;
+    }
+    
+    startButton.disabled = false;
+    startButton.textContent = 'Restart Training';
+    gridContainer.addEventListener('click', handleGridClick);
+    isTraining = false;
+}
+
+initGrid();
+startButton.addEventListener('click', startTraining);

@@ -24,14 +24,15 @@ You can create your own maze by setting a start point, a goal, and drawing obsta
 
 ## How to Use
 
-1.  Download the `mazerunner.html` file.
-2.  Open the file in any modern web browser (like Chrome, Firefox, or Edge).
-3.  **Click a cell** to set the **Start** position (🔵).
-4.  **Click another cell** to set the **Goal** position (🟢).
-5.  **Click any other cells** to toggle **Obstacles** (🟥).
-6.  Press the **"Start Training"** button.
-7.  Watch the agent learn! The left grid will show its current path, and the right grid will show its "brain" (the Q-values) evolving.
-8.  Once training is complete, the left grid will display the **final best path** found by the agent.
+1.  Download both the `mazerunner.html` and `mazerunner.js` files.
+2.  Ensure both files are in the same folder.
+3.  Open `mazerunner.html` in any modern web browser (like Chrome, Firefox, or Edge).
+4.  **Click a cell** to set the **Start** position (🔵).
+5.  **Click another cell** to set the **Goal** position (🟢).
+6.  **Click any other cells** to toggle **Obstacles** (🟥).
+7.  Press the **"Start Training"** button.
+8.  Watch the agent learn! The left grid will show its current path, and the right grid will show its "brain" (the Q-values) evolving.
+9.  Once training is complete, the left grid will display the **final best path** found by the agent.
 
 ---
 
@@ -68,7 +69,7 @@ This project implements a standard Deep Q-Network (DQN) agent.
     A utility-first CSS framework used for all layout, spacing, typography, and component styling.
 
 * **JavaScript (ES6+ Module)**
-    This is the engine of the entire application, running inside a single `<script type="module">` tag. It is responsible for:
+    This is the engine of the entire application, located in the `mazerunner.js` file. It is responsible for:
     * **DOM Manipulation:** Dynamically generating the grid cells and handling all user click events for setting up the maze.
     * **Environment Logic:** Defining the maze environment, including states, actions, and the reward system (the `step` function).
     * **DQN Algorithm:** Implementing the core reinforcement learning logic, including the experience replay buffer (`replayBuffer`), the epsilon-greedy policy (`getAction`), and the main training loop (`startTraining`).
